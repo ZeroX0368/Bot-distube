@@ -1,8 +1,9 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ActivityType } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const ytdl = require('@distube/ytdl-core');
 const YouTube = require('youtube-sr').default;
 const botstats = require('./shared/botstats');
+const blacklist = require('./shared/blacklist');
 const config = require('./config.json');
 
 const client = new Client({
@@ -114,6 +115,10 @@ async function playNextSong(guildId, interaction = null) {
 // Register slash commands
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
+    
+    // Set bot status and activity
+    client.user.setStatus(config.setStatus);
+    client.user.setActivity(config.setActivity, { type: ActivityType.Playing });
     
     const commands = [
         new SlashCommandBuilder()
@@ -288,6 +293,80 @@ client.once('ready', async () => {
                             .setDescription('Your feedback message')
                             .setRequired(true)
                     )
+            ),
+        
+        new SlashCommandBuilder()
+            .setName('blacklist')
+            .setDescription('Blacklist management (Owner only)')
+            .addSubcommandGroup(subcommandGroup =>
+                subcommandGroup
+                    .setName('user')
+                    .setDescription('User blacklist management')
+                    .addSubcommand(subcommand =>
+                        subcommand
+                            .setName('add')
+                            .setDescription('Add a user to blacklist')
+                            .addUserOption(option =>
+                                option.setName('user')
+                                    .setDescription('User to blacklist')
+                                    .setRequired(false)
+                            )
+                            .addStringOption(option =>
+                                option.setName('userid')
+                                    .setDescription('User ID to blacklist')
+                                    .setRequired(false)
+                            )
+                    )
+                    .addSubcommand(subcommand =>
+                        subcommand
+                            .setName('remove')
+                            .setDescription('Remove a user from blacklist')
+                            .addUserOption(option =>
+                                option.setName('user')
+                                    .setDescription('User to remove from blacklist')
+                                    .setRequired(false)
+                            )
+                            .addStringOption(option =>
+                                option.setName('userid')
+                                    .setDescription('User ID to remove from blacklist')
+                                    .setRequired(false)
+                            )
+                    )
+                    .addSubcommand(subcommand =>
+                        subcommand
+                            .setName('list')
+                            .setDescription('List blacklisted users')
+                    )
+            )
+            .addSubcommandGroup(subcommandGroup =>
+                subcommandGroup
+                    .setName('server')
+                    .setDescription('Server blacklist management')
+                    .addSubcommand(subcommand =>
+                        subcommand
+                            .setName('add')
+                            .setDescription('Add a server to blacklist')
+                            .addStringOption(option =>
+                                option.setName('serverid')
+                                    .setDescription('Server ID to blacklist')
+                                    .setRequired(true)
+                            )
+                    )
+                    .addSubcommand(subcommand =>
+                        subcommand
+                            .setName('remove')
+                            .setDescription('Remove a server from blacklist')
+                            .addStringOption(option =>
+                                option.setName('serverid')
+                                    .setDescription('Server ID to remove from blacklist')
+                                    .setRequired(true)
+                            )
+                    )
+                    .addSubcommand(subcommand =>
+                        subcommand
+                            .setName('list')
+                            .setDescription('List blacklisted servers')
+                    )
             )
     ];
     
@@ -309,6 +388,22 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.guild) {
         return interaction.reply({
             content: '❌ This bot only works in servers, not in DMs!',
+            ephemeral: true
+        });
+    }
+    
+    // Check if user is blacklisted
+    if (blacklist.isUserBlacklisted(interaction.user.id)) {
+        return interaction.reply({
+            content: '❌ You are blacklisted from using this bot!',
+            ephemeral: true
+        });
+    }
+    
+    // Check if server is blacklisted
+    if (blacklist.isServerBlacklisted(interaction.guild.id)) {
+        return interaction.reply({
+            content: '❌ This server is blacklisted from using this bot!',
             ephemeral: true
         });
     }
@@ -464,6 +559,235 @@ client.on('interactionCreate', async interaction => {
                 
                 await interaction.reply({ embeds: [confirmEmbed], ephemeral: true });
                 break;
+        }
+    } else if (interaction.commandName === 'blacklist') {
+        // Owner only command
+        if (interaction.user.id !== config.OwnerID) {
+            return interaction.reply({
+                content: '❌ This command is only available to the bot owner!',
+                ephemeral: true
+            });
+        }
+        
+        botstats.updateCommandCount();
+        
+        const subcommandGroup = interaction.options.getSubcommandGroup();
+        const subcommand = interaction.options.getSubcommand();
+        
+        if (subcommandGroup === 'user') {
+            switch (subcommand) {
+                case 'add':
+                    const userToAdd = interaction.options.getUser('user');
+                    const userIdToAdd = interaction.options.getString('userid');
+                    
+                    if (!userToAdd && !userIdToAdd) {
+                        return interaction.reply({
+                            content: '❌ Please provide either a user mention or user ID!',
+                            ephemeral: true
+                        });
+                    }
+                    
+                    const targetUserId = userToAdd ? userToAdd.id : userIdToAdd;
+                    const targetUsername = userToAdd ? userToAdd.tag : `User ID: ${userIdToAdd}`;
+                    
+                    if (targetUserId === config.OwnerID) {
+                        return interaction.reply({
+                            content: '❌ You cannot blacklist the bot owner!',
+                            ephemeral: true
+                        });
+                    }
+                    
+                    const userAdded = blacklist.addUser(targetUserId, targetUsername);
+                    if (userAdded) {
+                        const addEmbed = new EmbedBuilder()
+                            .setColor(config.EmbedColor)
+                            .setTitle('✅ User Blacklisted')
+                            .setDescription(`**${targetUsername}** has been added to the blacklist.`)
+                            .addFields({ name: 'User ID', value: targetUserId, inline: true })
+                            .setTimestamp();
+                        
+                        await interaction.reply({ embeds: [addEmbed] });
+                    } else {
+                        await interaction.reply({
+                            content: '❌ User is already blacklisted!',
+                            ephemeral: true
+                        });
+                    }
+                    break;
+                    
+                case 'remove':
+                    const userToRemove = interaction.options.getUser('user');
+                    const userIdToRemove = interaction.options.getString('userid');
+                    
+                    if (!userToRemove && !userIdToRemove) {
+                        return interaction.reply({
+                            content: '❌ Please provide either a user mention or user ID!',
+                            ephemeral: true
+                        });
+                    }
+                    
+                    const removeUserId = userToRemove ? userToRemove.id : userIdToRemove;
+                    const removeUsername = userToRemove ? userToRemove.tag : `User ID: ${userIdToRemove}`;
+                    
+                    const userRemoved = blacklist.removeUser(removeUserId);
+                    if (userRemoved) {
+                        const removeEmbed = new EmbedBuilder()
+                            .setColor(config.EmbedColor)
+                            .setTitle('✅ User Removed from Blacklist')
+                            .setDescription(`**${removeUsername}** has been removed from the blacklist.`)
+                            .addFields({ name: 'User ID', value: removeUserId, inline: true })
+                            .setTimestamp();
+                        
+                        await interaction.reply({ embeds: [removeEmbed] });
+                    } else {
+                        await interaction.reply({
+                            content: '❌ User is not blacklisted!',
+                            ephemeral: true
+                        });
+                    }
+                    break;
+                    
+                case 'list':
+                    const userPage = 0;
+                    const userList = blacklist.getBlacklistedUsers(userPage, 10);
+                    
+                    if (userList.users.length === 0) {
+                        return interaction.reply({
+                            content: '✅ No users are currently blacklisted.',
+                            ephemeral: true
+                        });
+                    }
+                    
+                    let userDescription = '';
+                    userList.users.forEach((user, index) => {
+                        userDescription += `${index + 1}. **${user.username}** (${user.id})\n`;
+                    });
+                    
+                    const userListEmbed = new EmbedBuilder()
+                        .setColor(config.EmbedColor)
+                        .setTitle('🚫 Blacklisted Users')
+                        .setDescription(userDescription)
+                        .setFooter({ text: `Page 1 | Total: ${userList.total} users` })
+                        .setTimestamp();
+                    
+                    const userButtons = new ActionRowBuilder();
+                    if (userList.hasMore) {
+                        userButtons.addComponents(
+                            new ButtonBuilder()
+                                .setCustomId('blacklist_user_next_1')
+                                .setLabel('Next')
+                                .setStyle(ButtonStyle.Primary)
+                        );
+                    }
+                    
+                    const replyOptions = { embeds: [userListEmbed] };
+                    if (userButtons.components.length > 0) {
+                        replyOptions.components = [userButtons];
+                    }
+                    
+                    await interaction.reply(replyOptions);
+                    break;
+            }
+        } else if (subcommandGroup === 'server') {
+            switch (subcommand) {
+                case 'add':
+                    const serverIdToAdd = interaction.options.getString('serverid');
+                    
+                    if (serverIdToAdd === interaction.guild.id) {
+                        return interaction.reply({
+                            content: '❌ You cannot blacklist the current server!',
+                            ephemeral: true
+                        });
+                    }
+                    
+                    let serverName = 'Unknown Server';
+                    try {
+                        const guild = await client.guilds.fetch(serverIdToAdd);
+                        serverName = guild.name;
+                    } catch (error) {
+                        serverName = `Server ID: ${serverIdToAdd}`;
+                    }
+                    
+                    const serverAdded = blacklist.addServer(serverIdToAdd, serverName);
+                    if (serverAdded) {
+                        const addServerEmbed = new EmbedBuilder()
+                            .setColor(config.EmbedColor)
+                            .setTitle('✅ Server Blacklisted')
+                            .setDescription(`**${serverName}** has been added to the blacklist.`)
+                            .addFields({ name: 'Server ID', value: serverIdToAdd, inline: true })
+                            .setTimestamp();
+                        
+                        await interaction.reply({ embeds: [addServerEmbed] });
+                    } else {
+                        await interaction.reply({
+                            content: '❌ Server is already blacklisted!',
+                            ephemeral: true
+                        });
+                    }
+                    break;
+                    
+                case 'remove':
+                    const serverIdToRemove = interaction.options.getString('serverid');
+                    
+                    const serverRemoved = blacklist.removeServer(serverIdToRemove);
+                    if (serverRemoved) {
+                        const removeServerEmbed = new EmbedBuilder()
+                            .setColor(config.EmbedColor)
+                            .setTitle('✅ Server Removed from Blacklist')
+                            .setDescription(`Server has been removed from the blacklist.`)
+                            .addFields({ name: 'Server ID', value: serverIdToRemove, inline: true })
+                            .setTimestamp();
+                        
+                        await interaction.reply({ embeds: [removeServerEmbed] });
+                    } else {
+                        await interaction.reply({
+                            content: '❌ Server is not blacklisted!',
+                            ephemeral: true
+                        });
+                    }
+                    break;
+                    
+                case 'list':
+                    const serverPage = 0;
+                    const serverList = blacklist.getBlacklistedServers(serverPage, 10);
+                    
+                    if (serverList.servers.length === 0) {
+                        return interaction.reply({
+                            content: '✅ No servers are currently blacklisted.',
+                            ephemeral: true
+                        });
+                    }
+                    
+                    let serverDescription = '';
+                    serverList.servers.forEach((server, index) => {
+                        serverDescription += `${index + 1}. **${server.name}** (${server.id})\n`;
+                    });
+                    
+                    const serverListEmbed = new EmbedBuilder()
+                        .setColor(config.EmbedColor)
+                        .setTitle('🚫 Blacklisted Servers')
+                        .setDescription(serverDescription)
+                        .setFooter({ text: `Page 1 | Total: ${serverList.total} servers` })
+                        .setTimestamp();
+                    
+                    const serverButtons = new ActionRowBuilder();
+                    if (serverList.hasMore) {
+                        serverButtons.addComponents(
+                            new ButtonBuilder()
+                                .setCustomId('blacklist_server_next_1')
+                                .setLabel('Next')
+                                .setStyle(ButtonStyle.Primary)
+                        );
+                    }
+                    
+                    const serverReplyOptions = { embeds: [serverListEmbed] };
+                    if (serverButtons.components.length > 0) {
+                        serverReplyOptions.components = [serverButtons];
+                    }
+                    
+                    await interaction.reply(serverReplyOptions);
+                    break;
+            }
         }
     } else if (interaction.commandName === 'music') {
         botstats.updateCommandCount();
@@ -778,6 +1102,181 @@ client.on('interactionCreate', async interaction => {
                 interaction.reply({ content: `🎤 Lyrics search for "${queue.currentSong.title}" is not available in this version. You can search for lyrics manually on Google or other lyrics websites.` });
                 break;
         }
+    }
+});
+
+// Handle button interactions for blacklist pagination
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isButton()) return;
+    
+    if (interaction.customId.startsWith('blacklist_user_next_')) {
+        const page = parseInt(interaction.customId.split('_')[3]);
+        const userList = blacklist.getBlacklistedUsers(page, 10);
+        
+        let userDescription = '';
+        userList.users.forEach((user, index) => {
+            userDescription += `${index + 1 + (page * 10)}. **${user.username}** (${user.id})\n`;
+        });
+        
+        const userListEmbed = new EmbedBuilder()
+            .setColor(config.EmbedColor)
+            .setTitle('🚫 Blacklisted Users')
+            .setDescription(userDescription)
+            .setFooter({ text: `Page ${page + 1} | Total: ${userList.total} users` })
+            .setTimestamp();
+        
+        const userButtons = new ActionRowBuilder();
+        if (page > 0) {
+            userButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`blacklist_user_prev_${page - 1}`)
+                    .setLabel('Previous')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
+        if (userList.hasMore) {
+            userButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`blacklist_user_next_${page + 1}`)
+                    .setLabel('Next')
+                    .setStyle(ButtonStyle.Primary)
+            );
+        }
+        
+        const updateOptions = { embeds: [userListEmbed] };
+        if (userButtons.components.length > 0) {
+            updateOptions.components = [userButtons];
+        } else {
+            updateOptions.components = [];
+        }
+        
+        await interaction.update(updateOptions);
+    } else if (interaction.customId.startsWith('blacklist_user_prev_')) {
+        const page = parseInt(interaction.customId.split('_')[3]);
+        const userList = blacklist.getBlacklistedUsers(page, 10);
+        
+        let userDescription = '';
+        userList.users.forEach((user, index) => {
+            userDescription += `${index + 1 + (page * 10)}. **${user.username}** (${user.id})\n`;
+        });
+        
+        const userListEmbed = new EmbedBuilder()
+            .setColor(config.EmbedColor)
+            .setTitle('🚫 Blacklisted Users')
+            .setDescription(userDescription)
+            .setFooter({ text: `Page ${page + 1} | Total: ${userList.total} users` })
+            .setTimestamp();
+        
+        const userButtons = new ActionRowBuilder();
+        if (page > 0) {
+            userButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`blacklist_user_prev_${page - 1}`)
+                    .setLabel('Previous')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
+        if (userList.hasMore) {
+            userButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`blacklist_user_next_${page + 1}`)
+                    .setLabel('Next')
+                    .setStyle(ButtonStyle.Primary)
+            );
+        }
+        
+        const updateOptions = { embeds: [userListEmbed] };
+        if (userButtons.components.length > 0) {
+            updateOptions.components = [userButtons];
+        } else {
+            updateOptions.components = [];
+        }
+        
+        await interaction.update(updateOptions);
+    } else if (interaction.customId.startsWith('blacklist_server_next_')) {
+        const page = parseInt(interaction.customId.split('_')[3]);
+        const serverList = blacklist.getBlacklistedServers(page, 10);
+        
+        let serverDescription = '';
+        serverList.servers.forEach((server, index) => {
+            serverDescription += `${index + 1 + (page * 10)}. **${server.name}** (${server.id})\n`;
+        });
+        
+        const serverListEmbed = new EmbedBuilder()
+            .setColor(config.EmbedColor)
+            .setTitle('🚫 Blacklisted Servers')
+            .setDescription(serverDescription)
+            .setFooter({ text: `Page ${page + 1} | Total: ${serverList.total} servers` })
+            .setTimestamp();
+        
+        const serverButtons = new ActionRowBuilder();
+        if (page > 0) {
+            serverButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`blacklist_server_prev_${page - 1}`)
+                    .setLabel('Previous')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
+        if (serverList.hasMore) {
+            serverButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`blacklist_server_next_${page + 1}`)
+                    .setLabel('Next')
+                    .setStyle(ButtonStyle.Primary)
+            );
+        }
+        
+        const updateOptions = { embeds: [serverListEmbed] };
+        if (serverButtons.components.length > 0) {
+            updateOptions.components = [serverButtons];
+        } else {
+            updateOptions.components = [];
+        }
+        
+        await interaction.update(updateOptions);
+    } else if (interaction.customId.startsWith('blacklist_server_prev_')) {
+        const page = parseInt(interaction.customId.split('_')[3]);
+        const serverList = blacklist.getBlacklistedServers(page, 10);
+        
+        let serverDescription = '';
+        serverList.servers.forEach((server, index) => {
+            serverDescription += `${index + 1 + (page * 10)}. **${server.name}** (${server.id})\n`;
+        });
+        
+        const serverListEmbed = new EmbedBuilder()
+            .setColor(config.EmbedColor)
+            .setTitle('🚫 Blacklisted Servers')
+            .setDescription(serverDescription)
+            .setFooter({ text: `Page ${page + 1} | Total: ${serverList.total} servers` })
+            .setTimestamp();
+        
+        const serverButtons = new ActionRowBuilder();
+        if (page > 0) {
+            serverButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`blacklist_server_prev_${page - 1}`)
+                    .setLabel('Previous')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
+        if (serverList.hasMore) {
+            serverButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`blacklist_server_next_${page + 1}`)
+                    .setLabel('Next')
+                    .setStyle(ButtonStyle.Primary)
+            );
+        }
+        
+        const updateOptions = { embeds: [serverListEmbed] };
+        if (serverButtons.components.length > 0) {
+            updateOptions.components = [serverButtons];
+        } else {
+            updateOptions.components = [];
+        }
+        
+        await interaction.update(updateOptions);
     }
 });
 
