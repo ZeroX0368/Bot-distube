@@ -244,6 +244,50 @@ client.once('ready', async () => {
                 subcommand
                     .setName('lyrics')
                     .setDescription('Get the lyrics of the current song')
+            ),
+        
+        new SlashCommandBuilder()
+            .setName('bot')
+            .setDescription('Bot utility commands')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('help')
+                    .setDescription('Get general bot help information')
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('info')
+                    .setDescription('Get bot information and statistics')
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('invite')
+                    .setDescription('Get bot invite link')
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('support')
+                    .setDescription('Get support server link')
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('uptime')
+                    .setDescription('Get bot uptime')
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('ping')
+                    .setDescription('Get bot latency')
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('feedback')
+                    .setDescription('Send feedback to the bot developers')
+                    .addStringOption(option =>
+                        option.setName('message')
+                            .setDescription('Your feedback message')
+                            .setRequired(true)
+                    )
             )
     ];
     
@@ -255,10 +299,173 @@ client.once('ready', async () => {
     }
 });
 
+// Bot start time for uptime calculation
+const botStartTime = Date.now();
+
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
     
-    if (interaction.commandName === 'music') {
+    // Check if command is used in a guild (not in DMs)
+    if (!interaction.guild) {
+        return interaction.reply({
+            content: '❌ This bot only works in servers, not in DMs!',
+            ephemeral: true
+        });
+    }
+    
+    if (interaction.commandName === 'bot') {
+        botstats.updateCommandCount();
+        
+        const subcommand = interaction.options.getSubcommand();
+        
+        switch (subcommand) {
+            case 'help':
+                const helpEmbed = new EmbedBuilder()
+                    .setColor(config.EmbedColor)
+                    .setTitle('🤖 Bot Help')
+                    .setDescription('Welcome to the Discord Music Bot! Here are the available commands:')
+                    .addFields(
+                        { name: '🎵 Music Commands', value: 'Use `/music help` to see all music-related commands', inline: false },
+                        { name: '🤖 Bot Commands', value: '`/bot info` - Bot information\n`/bot invite` - Get invite link\n`/bot support` - Support server\n`/bot uptime` - Bot uptime\n`/bot ping` - Bot latency\n`/bot feedback` - Send feedback', inline: false },
+                        { name: '💡 Getting Started', value: 'Join a voice channel and use `/music play <song>` to start playing music!', inline: false }
+                    )
+                    .setFooter({ text: `Bot made with ❤️ | Total commands used: ${botstats.commandsUsed}` })
+                    .setTimestamp();
+                
+                await interaction.reply({ embeds: [helpEmbed] });
+                break;
+                
+            case 'info':
+                // Update guild count
+                botstats.updateGuildCount(client.guilds.cache.size);
+                
+                const uptime = Date.now() - botStartTime;
+                const uptimeSeconds = Math.floor(uptime / 1000);
+                const days = Math.floor(uptimeSeconds / 86400);
+                const hours = Math.floor((uptimeSeconds % 86400) / 3600);
+                const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+                const seconds = uptimeSeconds % 60;
+                
+                const infoEmbed = new EmbedBuilder()
+                    .setColor(config.EmbedColor)
+                    .setTitle('🤖 Bot Information')
+                    .setDescription('Discord Music Bot with YouTube integration')
+                    .addFields(
+                        { name: '📊 Statistics', value: `**Servers**: ${botstats.guildsCount}\n**Commands Used**: ${botstats.commandsUsed}\n**Users**: ${client.users.cache.size}`, inline: true },
+                        { name: '⏱️ Uptime', value: `${days}d ${hours}h ${minutes}m ${seconds}s`, inline: true },
+                        { name: '🔧 Technical Info', value: `**Node.js**: ${process.version}\n**Discord.js**: v14\n**Memory**: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`, inline: true }
+                    )
+                    .setThumbnail(client.user.displayAvatarURL())
+                    .setFooter({ text: 'Made with ❤️ using Discord.js' })
+                    .setTimestamp();
+                
+                await interaction.reply({ embeds: [infoEmbed] });
+                break;
+                
+            case 'invite':
+                const inviteEmbed = new EmbedBuilder()
+                    .setColor(config.EmbedColor)
+                    .setTitle('📬 Invite the Bot')
+                    .setDescription('Add this music bot to your server!')
+                    .addFields(
+                        { name: '🔗 Invite Link', value: `[Click here to invite me!](https://discord.com/api/oauth2/authorize?client_id=${client.user.id}&permissions=36868096&scope=bot%20applications.commands)`, inline: false },
+                        { name: '🔐 Required Permissions', value: 'Connect, Speak, Send Messages, Use Slash Commands', inline: false }
+                    )
+                    .setThumbnail(client.user.displayAvatarURL())
+                    .setTimestamp();
+                
+                await interaction.reply({ embeds: [inviteEmbed] });
+                break;
+                
+            case 'support':
+                const supportEmbed = new EmbedBuilder()
+                    .setColor(config.EmbedColor)
+                    .setTitle('🆘 Support')
+                    .setDescription('Need help or have questions?')
+                    .addFields(
+                        { name: '📞 Support Server', value: config.Support ? `[Join our support server](${config.Support})` : 'Support server not configured', inline: false },
+                        { name: '📝 Feedback', value: 'Use `/bot feedback <message>` to send us feedback directly!', inline: false }
+                    )
+                    .setTimestamp();
+                
+                await interaction.reply({ embeds: [supportEmbed] });
+                break;
+                
+            case 'uptime':
+                const currentUptime = Date.now() - botStartTime;
+                const currentUptimeSeconds = Math.floor(currentUptime / 1000);
+                const uptimeDays = Math.floor(currentUptimeSeconds / 86400);
+                const uptimeHours = Math.floor((currentUptimeSeconds % 86400) / 3600);
+                const uptimeMinutes = Math.floor((currentUptimeSeconds % 3600) / 60);
+                const uptimeSecs = currentUptimeSeconds % 60;
+                
+                const uptimeEmbed = new EmbedBuilder()
+                    .setColor(config.EmbedColor)
+                    .setTitle('⏱️ Bot Uptime')
+                    .setDescription(`The bot has been online for:`)
+                    .addFields(
+                        { name: '📅 Days', value: `${uptimeDays}`, inline: true },
+                        { name: '⏰ Hours', value: `${uptimeHours}`, inline: true },
+                        { name: '⏱️ Minutes', value: `${uptimeMinutes}`, inline: true },
+                        { name: '⏳ Seconds', value: `${uptimeSecs}`, inline: true }
+                    )
+                    .setTimestamp();
+                
+                await interaction.reply({ embeds: [uptimeEmbed] });
+                break;
+                
+            case 'ping':
+                const sent = await interaction.reply({ content: 'Pinging...', fetchReply: true });
+                const pingEmbed = new EmbedBuilder()
+                    .setColor(config.EmbedColor)
+                    .setTitle('🏓 Pong!')
+                    .addFields(
+                        { name: '📡 Latency', value: `${sent.createdTimestamp - interaction.createdTimestamp}ms`, inline: true },
+                        { name: '💓 API Latency', value: `${Math.round(client.ws.ping)}ms`, inline: true }
+                    )
+                    .setTimestamp();
+                
+                await interaction.editReply({ content: '', embeds: [pingEmbed] });
+                break;
+                
+            case 'feedback':
+                const feedbackMessage = interaction.options.getString('message');
+                
+                // Send feedback to configured channel if available
+                if (config.FeedBackChannelID) {
+                    try {
+                        const feedbackChannel = await client.channels.fetch(config.FeedBackChannelID);
+                        if (feedbackChannel) {
+                            const feedbackEmbed = new EmbedBuilder()
+                                .setColor(config.EmbedColor)
+                                .setTitle('📝 New Feedback')
+                                .setDescription(feedbackMessage)
+                                .addFields(
+                                    { name: 'From', value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
+                                    { name: 'Server', value: `${interaction.guild.name} (${interaction.guild.id})`, inline: true }
+                                )
+                                .setTimestamp();
+                            
+                            await feedbackChannel.send({ embeds: [feedbackEmbed] });
+                        }
+                    } catch (error) {
+                        console.error('Error sending feedback:', error);
+                    }
+                }
+                
+                const confirmEmbed = new EmbedBuilder()
+                    .setColor(config.EmbedColor)
+                    .setTitle('✅ Feedback Sent')
+                    .setDescription('Thank you for your feedback! We appreciate your input.')
+                    .addFields(
+                        { name: '📝 Your Message', value: feedbackMessage, inline: false }
+                    )
+                    .setTimestamp();
+                
+                await interaction.reply({ embeds: [confirmEmbed], ephemeral: true });
+                break;
+        }
+    } else if (interaction.commandName === 'music') {
         botstats.updateCommandCount();
         
         const subcommand = interaction.options.getSubcommand();
